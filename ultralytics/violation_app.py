@@ -38,6 +38,18 @@ class GrYoloPredict():
         self.violation_text = ""
         self.track_history = defaultdict(lambda: [])
 
+
+    def reset(self):
+        """
+        重置所有变量
+        """
+        self.current_time = 0.0
+        self.tracking_data = {}
+        self.violation_status = {}
+        self.violation_text = ""
+        self.track_history = defaultdict(lambda: [])
+
+
     def yolo_inference(self, image, video, model_id, image_size, conf_threshold):
         """
         路面违停识别算法实现，标红重叠占比达到70%的检测框，并且统计违停时间。
@@ -75,7 +87,7 @@ class GrYoloPredict():
 
             return plot2[:, :, ::-1], None
         else:
-            temp_dir = "D:/project/ultralytics/temp"  # 例如: "C:/my_temp" 或 "/tmp/my_custom_temp"
+            temp_dir = "temp"  # 例如: "C:/my_temp" 或 "/tmp/my_custom_temp"
             os.makedirs(temp_dir, exist_ok=True)
             video_path = tempfile.mktemp(suffix=".webm", dir=temp_dir)
             with open(video_path, "wb") as f:
@@ -105,7 +117,7 @@ class GrYoloPredict():
 
                 # 计算覆盖率并获取高亮索引
                 coverage_ratios, highlight_indices = self.compute_coverage_and_highlight(results1[0], results2[0])
-                plot = results1[0].plot()  # 两个模型推理结果
+                plot = self.plot_masks_only(results1[0])  # 第一个模型推理掩码结果
 
                 # Get the boxes and track IDs
                 if trace.boxes and trace.boxes.is_track:
@@ -127,15 +139,6 @@ class GrYoloPredict():
                         # 更新轨迹历史
                         if track_id not in self.track_history:
                             self.track_history[track_id] = []
-                        # x, y, w, h = box
-                        # track = self.track_history[track_id]
-                        # track.append((float(x), float(y)))  # x, y center point
-                        # if len(track) > 30:  # retain 30 tracks for 30 frames
-                        #     track.pop(0)
-                        #
-                        # # Draw the tracking lines
-                        # points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
-                        # cv2.polylines(plot, [points], isClosed=False, color=(0, 0, 255), thickness=2)
 
                 # 在第二个模型的可视化结果上标红高IOU框
                 if hasattr(results2[0], 'boxes') and len(highlight_indices) > 0:
@@ -188,6 +191,7 @@ class GrYoloPredict():
 
             cap.release()
             out.release()
+            self.reset()
 
             return None, output_video_path
 
@@ -195,43 +199,6 @@ class GrYoloPredict():
     def yolo_inference_for_examples(self, image, model_id, image_size, conf_threshold):
         annotated_image, _ = self.yolo_inference(image, None, model_id, image_size, conf_threshold)
         return annotated_image
-
-    '''
-    # 计算两个模型检测框之间的IOU
-    def compute_cross_model_iou(model1_results, model2_results, iou_threshold=0.1):
-        """
-        计算两个YOLO模型结果之间的检测框IOU，并标记高IOU的检测框
-    
-        参数:
-        model1_results -- 第一个模型的推理结果 (ultralytics.engine.results.Results)
-        model2_results -- 第二个模型的推理结果 (ultralytics.engine.results.Results)
-        iou_threshold -- IOU阈值，超过此值则标记为高匹配 (默认0.7)
-    
-        返回:
-        (iou_matrix, highlight_indices) 元组:
-            iou_matrix -- 两个模型检测框的IOU矩阵 (torch.Tensor)
-            highlight_indices -- 第二个模型中需要高亮的框索引列表
-        """
-        # 提取两个模型的检测框 (xyxy格式)
-        boxes1 = model1_results.boxes.xyxy.cpu()  # 移动到CPU并转为tensor
-        boxes2 = model2_results.boxes.xyxy.cpu()
-    
-        # 初始化空结果
-        iou_matrix = torch.tensor([])
-        highlight_indices = []
-    
-        # 仅当两个模型都有检测框时才计算IOU
-        if len(boxes1) > 0 and len(boxes2) > 0:
-            # 计算IOU矩阵 (shape: [boxes1_count, boxes2_count])
-            iou_matrix = box_iou(boxes1, boxes2)
-    
-            # 找到需要高亮的框 (第二个模型中与第一个模型任意框IOU>阈值的框)
-            for j in range(iou_matrix.shape[1]):
-                if torch.any(iou_matrix[:, j] > iou_threshold):
-                    highlight_indices.append(j)
-    
-        return iou_matrix, highlight_indices
-    '''
 
 
     def compute_coverage_and_highlight(self, model1_results, model2_results, coverage_threshold=0.4):
@@ -299,121 +266,51 @@ class GrYoloPredict():
 
         return coverage_ratios, highlight_indices
 
-"""
-    def merge_names(self, names1: Dict[int, str], names2: Dict[int, str]) -> tuple[dict[Any, Any], dict[int, dict[Any, Any]]]:
-        """"""
-        合并两个names字典，并返回映射关系
-        返回:
-            merged_names: 合并后的{id: name}字典
-            cls_mapping: 原始ID到新ID的映射 {model1_id: new_id}, {model2_id: new_id}
-        """"""
-        merged_names = {}
-        cls_mapping = {1: {}, 2: {}}  # 分别存储model1和model2的ID映射
 
-        # 合并names1（保留原有ID优先）
-        max_id = 0
-        for id_, name in names1.items():
-            if name not in merged_names.values():
-                merged_names[id_] = name
-                cls_mapping[1][id_] = id_  # model1的ID保持不变
-                max_id = max(max_id, id_)
+    def plot_masks_only(self, result, alpha=0.5):
+        """
+        仅绘制掩码（不绘制边界框和标签）
+        result: 单个图像的预测结果（results[0]）
+        alpha: 掩码透明度 (0-1)
+        """
+        # 获取原始图像
+        img = result.orig_img.copy()
+        if result.masks is None:
+            return img  # 如果没有检测到掩码，返回原图
 
-        # 合并names2（处理冲突）
-        for id_, name in names2.items():
-            if name in merged_names.values():
-                # 名称已存在，找到对应ID
-                existing_id = [k for k, v in merged_names.items() if v == name][0]
-                cls_mapping[2][id_] = existing_id
-            else:
-                # 新名称，分配新ID
-                new_id = max_id + 1
-                merged_names[new_id] = name
-                cls_mapping[2][id_] = new_id
-                max_id = new_id
+        # 确保掩码尺寸与原始图像匹配
+        orig_h, orig_w = img.shape[:2]
+        masks = result.masks.data.cpu().numpy()  # 掩码数据 (n, H, W)
 
-        return merged_names, cls_mapping
+        # 调整掩码尺寸（如果需要）
+        if masks.shape[1:] != (orig_h, orig_w):
+            # 创建空数组存放调整后的掩码
+            resized_masks = np.zeros((masks.shape[0], orig_h, orig_w), dtype=masks.dtype)
 
-    def merge_yolo_results(self,
-            results1: Results,
-            results2: Results,
-            image: Optional[np.ndarray] = None
-    ):
-        """"""
-        合并两个YOLO模型的推理结果
+            # 调整每个掩码尺寸
+            for i, mask in enumerate(masks):
+                # 使用最近邻插值保持二值特性
+                resized_masks[i] = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
 
-        参数:
-            results1: 第一个模型的Results对象
-            results2: 第二个模型的Results对象
+            masks = resized_masks
 
-        返回:
-            合并后的Results对象
+        clss = result.boxes.cls.cpu().numpy()  # 类别索引
 
-        示例:
-            merged_results = merge_yolo_results(results1[0], results2[0], image)
-            merged_results.show()  # 显示合并结果
-        """"""
+        # 为每个掩码创建彩色覆盖层
+        for i, (mask, cls) in enumerate(zip(masks, clss)):
+            color = [255, 0, 0]  # 获取BGR颜色
+            colored_mask = np.zeros_like(img, dtype=np.uint8)
+            colored_mask[:] = color
 
-        # 初始化空容器
-        boxes = []
-        masks = []
-        probs = []
-        keypoints = []
-        obb = []
+            # 确保掩码是单通道8位无符号整数
+            mask_uint8 = mask.astype(np.uint8)
 
-        # 合并names并获取ID映射
-        merged_names, cls_mapping = self.merge_names(results1.names, results2.names)
+            # 应用掩码并叠加到图像
+            masked_colored = cv2.bitwise_and(colored_mask, colored_mask, mask=mask_uint8)
+            img = cv2.addWeighted(img, 1, masked_colored, alpha, 0)
 
-        # 提取results1的数据 (如果存在)
-        if hasattr(results1, 'boxes') and results1.boxes is not None:
-            boxes1 = results1.boxes.data.clone()
-            for old_id, new_id in cls_mapping[1].items():
-                boxes1[boxes1[:, 5] == old_id, 5] = new_id  # 重映射cls
-            boxes.append(boxes1)
-            if hasattr(results1, 'masks') and results1.masks is not None:
-                masks.append(results1.masks.data)
-        if hasattr(results1, 'keypoints') and results1.keypoints is not None:
-            keypoints.append(results1.keypoints.data)
-        if hasattr(results1, 'probs') and results1.probs is not None:
-            probs.append(results1.probs.data)
-        if hasattr(results1, 'obb') and results1.obb is not None:
-            obb.append(results1.obb.data)
+        return img
 
-        # 提取results2的数据 (如果存在)
-        if hasattr(results2, 'boxes') and results2.boxes is not None:
-            boxes2 = results2.boxes.data.clone()
-            for old_id, new_id in cls_mapping[2].items():
-                boxes2[boxes2[:, 5] == old_id, 5] = new_id  # 重映射cls
-            boxes.append(boxes2)
-            if hasattr(results2.boxes, 'masks') and results2.masks is not None:
-                masks.append(results2.masks.data)
-        if hasattr(results2, 'keypoints') and results2.keypoints is not None:
-            keypoints.append(results2.keypoints.data)
-        if hasattr(results2, 'probs') and results2.probs is not None:
-            probs.append(results2.probs.data)
-        if hasattr(results2, 'obb') and results2.obb is not None:
-            obb.append(results2.obb.data)
-
-        # 合并所有检测结果
-        merged_boxes = torch.cat(boxes, dim=0) if boxes else torch.empty((0, 6))
-        merged_masks = torch.cat(masks, dim=0) if masks else None
-        merged_keypoints = torch.cat(keypoints, dim=0) if keypoints else None
-        merged_probs = torch.stack(probs).mean(dim=0) if probs else None
-        merged_obb = torch.cat(obb, dim=0) if obb else None
-
-        # 创建新的Results对象
-        merged_results = Results(
-            orig_img=image if image is not None else results1.orig_img,
-            path=results1.path,
-            names=merged_names,
-            boxes=merged_boxes,
-            masks=merged_masks,
-            keypoints=merged_keypoints,
-            probs=merged_probs,
-            obb=merged_obb
-        )
-
-        return merged_results
-"""
 
 gr_predict = GrYoloPredict()
 
