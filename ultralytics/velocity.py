@@ -147,11 +147,6 @@ class VehicleSpeedEstimator():
             return None, output_video_path
 
 
-    def yolo_inference_for_examples(self, image, model_id, image_size, conf_threshold):
-        annotated_image, _ = velocity.yolo_inference(image, None, model_id, image_size, conf_threshold)
-        return annotated_image
-
-
 velocity = VehicleSpeedEstimator()
 
 

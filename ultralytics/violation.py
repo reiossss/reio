@@ -3,7 +3,6 @@ import tempfile
 import os
 from ultralytics import YOLO
 import torch
-import numpy as np
 from torchvision.ops import box_area
 from collections import defaultdict
 from shapely.geometry import Polygon
@@ -72,7 +71,7 @@ class YoloPredict():
 
             # 计算覆盖率并获取高亮索引
             coverage_ratios, highlight_indices = self.compute_coverage_and_highlight(results1[0], results2[0])
-            plot = self.plot_masks_only(results1[0])  # 第一个模型推理掩码结果
+            plot = results1[0].plot(boxes=False)  # 第一个模型推理掩码结果
             image_path = tempfile.mktemp(suffix=".png", dir=temp_dir)
             cv2.imwrite(image_path, plot)
 
@@ -113,7 +112,7 @@ class YoloPredict():
 
                 # 计算覆盖率并获取高亮索引
                 coverage_ratios, highlight_indices = self.compute_coverage_and_highlight(results1[0], results2[0])
-                plot = self.plot_masks_only(results1[0])  # 第一个模型推理掩码结果
+                plot = results1[0].plot(boxes=False)  # 第一个模型推理掩码结果
 
                 # Get the boxes and track IDs
                 if trace.boxes and trace.boxes.is_track:
@@ -256,50 +255,6 @@ class YoloPredict():
                     highlight_indices.append(j)
 
         return coverage_ratios, highlight_indices
-
-    def plot_masks_only(self, result, alpha=0.5):
-        """
-        仅绘制掩码（不绘制边界框和标签）
-        result: 单个图像的预测结果（results[0]）
-        alpha: 掩码透明度 (0-1)
-        """
-        # 获取原始图像
-        img = result.orig_img.copy()
-        if result.masks is None:
-            return img  # 如果没有检测到掩码，返回原图
-
-        # 确保掩码尺寸与原始图像匹配
-        orig_h, orig_w = img.shape[:2]
-        masks = result.masks.data.cpu().numpy()  # 掩码数据 (n, H, W)
-
-        # 调整掩码尺寸（如果需要）
-        if masks.shape[1:] != (orig_h, orig_w):
-            # 创建空数组存放调整后的掩码
-            resized_masks = np.zeros((masks.shape[0], orig_h, orig_w), dtype=masks.dtype)
-
-            # 调整每个掩码尺寸
-            for i, mask in enumerate(masks):
-                # 使用最近邻插值保持二值特性
-                resized_masks[i] = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-
-            masks = resized_masks
-
-        clss = result.boxes.cls.cpu().numpy()  # 类别索引
-
-        # 为每个掩码创建彩色覆盖层
-        for i, (mask, cls) in enumerate(zip(masks, clss)):
-            color = [255, 0, 0]  # 获取BGR颜色
-            colored_mask = np.zeros_like(img, dtype=np.uint8)
-            colored_mask[:] = color
-
-            # 确保掩码是单通道8位无符号整数
-            mask_uint8 = mask.astype(np.uint8)
-
-            # 应用掩码并叠加到图像
-            masked_colored = cv2.bitwise_and(colored_mask, colored_mask, mask=mask_uint8)
-            img = cv2.addWeighted(img, 1, masked_colored, alpha, 0)
-
-        return img
 
 
 gr_predict = YoloPredict()

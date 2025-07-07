@@ -16,12 +16,12 @@ folder:
     .
     └── PATH_TO_input_folder
         ├── images
-            ├── 1.jpg
-            ├── 2.jpg
+            ├── 001.jpg
+            ├── 002.jpg
             └── ...
         ├── labels
-            ├── 1.txt
-            ├── 2.txt
+            ├── 001.txt
+            ├── 002.txt
             └── ...
 """
 
