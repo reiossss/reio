@@ -216,56 +216,56 @@ class Augmentor:
         img_pil = enhancer.enhance(factor)
         return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
-    @staticmethod
-    def cutmix_two(image1, labels1, image2, labels2):
-        """
-        两张图像的裁剪混合
-        保持原始图像大小，通过裁剪不同区域进行混合
-        """
-        h, w, _ = image1.shape
-        result_image = image1.copy()
-        result_labels = labels1.copy() if labels1 else []
-
-        # 随机确定裁剪区域大小（原始图像的20%-50%）
-        crop_w = int(w * random.uniform(0.2, 0.5))
-        crop_h = int(h * random.uniform(0.2, 0.5))
-
-        # 随机确定裁剪位置
-        x = random.randint(0, w - crop_w)
-        y = random.randint(0, h - crop_h)
-
-        # 从第二张图像中裁剪区域
-        crop_img = image2[y:y + crop_h, x:x + crop_w]
-
-        # 将裁剪区域覆盖到基础图像
-        result_image[y:y + crop_h, x:x + crop_w] = crop_img
-
-        # 处理标签：只添加在裁剪区域内的标签
-        if labels2:
-            for label in labels2:
-                cls_id, cx, cy, bw, bh = label
-                # 转换为绝对坐标
-                box_x = cx * w
-                box_y = cy * h
-                box_w = bw * w
-                box_h = bh * h
-
-                # 计算边界框坐标
-                x1 = box_x - box_w / 2
-                y1 = box_y - box_h / 2
-                x2 = box_x + box_w / 2
-                y2 = box_y + box_h / 2
-
-                # 检查边界框是否在裁剪区域内
-                if (x1 >= x and y1 >= y and x2 <= x + crop_w and y2 <= y + crop_h):
-                    # 转换为相对于整个图像的坐标
-                    new_cx = (x1 + x2) / (2 * w)
-                    new_cy = (y1 + y2) / (2 * h)
-                    new_bw = box_w / w
-                    new_bh = box_h / h
-                    result_labels.append([cls_id, new_cx, new_cy, new_bw, new_bh])
-
-        return result_image, result_labels
+    # @staticmethod
+    # def cutmix_two(image1, labels1, image2, labels2):
+    #     """
+    #     两张图像的裁剪混合
+    #     保持原始图像大小，通过裁剪不同区域进行混合
+    #     """
+    #     h, w, _ = image1.shape
+    #     result_image = image1.copy()
+    #     result_labels = labels1.copy() if labels1 else []
+    #
+    #     # 随机确定裁剪区域大小（原始图像的20%-50%）
+    #     crop_w = int(w * random.uniform(0.2, 0.5))
+    #     crop_h = int(h * random.uniform(0.2, 0.5))
+    #
+    #     # 随机确定裁剪位置
+    #     x = random.randint(0, w - crop_w)
+    #     y = random.randint(0, h - crop_h)
+    #
+    #     # 从第二张图像中裁剪区域
+    #     crop_img = image2[y:y + crop_h, x:x + crop_w]
+    #
+    #     # 将裁剪区域覆盖到基础图像
+    #     result_image[y:y + crop_h, x:x + crop_w] = crop_img
+    #
+    #     # 处理标签：只添加在裁剪区域内的标签
+    #     if labels2:
+    #         for label in labels2:
+    #             cls_id, cx, cy, bw, bh = label
+    #             # 转换为绝对坐标
+    #             box_x = cx * w
+    #             box_y = cy * h
+    #             box_w = bw * w
+    #             box_h = bh * h
+    #
+    #             # 计算边界框坐标
+    #             x1 = box_x - box_w / 2
+    #             y1 = box_y - box_h / 2
+    #             x2 = box_x + box_w / 2
+    #             y2 = box_y + box_h / 2
+    #
+    #             # 检查边界框是否在裁剪区域内
+    #             if (x1 >= x and y1 >= y and x2 <= x + crop_w and y2 <= y + crop_h):
+    #                 # 转换为相对于整个图像的坐标
+    #                 new_cx = (x1 + x2) / (2 * w)
+    #                 new_cy = (y1 + y2) / (2 * h)
+    #                 new_bw = box_w / w
+    #                 new_bh = box_h / h
+    #                 result_labels.append([cls_id, new_cx, new_cy, new_bw, new_bh])
+    #
+    #     return result_image, result_labels
 
 
 def main():
@@ -360,31 +360,31 @@ def main():
                 aug_image = Augmentor.adjust_saturation(aug_image)
 
             # 随机选择另一张图像进行裁剪混合
-            if random.random() < 0.5 and len(image_files) > 1:  # 50%概率应用裁剪混合
-                other_file = random.choice([f for f in image_files if f != img_file])
-                other_base = os.path.splitext(other_file)[0]
-                other_img = cv2.imread(f'{input_dir}/images/{other_file}')
-
-                if other_img is not None:
-                    # 调整其他图像大小以匹配基础图像
-                    if other_img.shape[:2] != aug_image.shape[:2]:
-                        other_img = cv2.resize(other_img, (aug_image.shape[1], aug_image.shape[0]))
-
-                    # 读取其他图像的标签
-                    other_labels = []
-                    other_label_path = f'{input_dir}/labels/{other_base}.txt'
-                    if os.path.exists(other_label_path):
-                        with open(other_label_path, 'r') as f:
-                            for line in f:
-                                parts = line.strip().split()
-                                if len(parts) == 5:
-                                    other_labels.append([int(parts[0]), *map(float, parts[1:5])])
-
-                    # 应用两张图像的裁剪混合
-                    aug_image, aug_labels = Augmentor.cutmix_two(
-                        aug_image, aug_labels,
-                        other_img, other_labels
-                    )
+            # if random.random() < 0.5 and len(image_files) > 1:  # 50%概率应用裁剪混合
+            #     other_file = random.choice([f for f in image_files if f != img_file])
+            #     other_base = os.path.splitext(other_file)[0]
+            #     other_img = cv2.imread(f'{input_dir}/images/{other_file}')
+            #
+            #     if other_img is not None:
+            #         # 调整其他图像大小以匹配基础图像
+            #         if other_img.shape[:2] != aug_image.shape[:2]:
+            #             other_img = cv2.resize(other_img, (aug_image.shape[1], aug_image.shape[0]))
+            #
+            #         # 读取其他图像的标签
+            #         other_labels = []
+            #         other_label_path = f'{input_dir}/labels/{other_base}.txt'
+            #         if os.path.exists(other_label_path):
+            #             with open(other_label_path, 'r') as f:
+            #                 for line in f:
+            #                     parts = line.strip().split()
+            #                     if len(parts) == 5:
+            #                         other_labels.append([int(parts[0]), *map(float, parts[1:5])])
+            #
+            #         # 应用两张图像的裁剪混合
+            #         aug_image, aug_labels = Augmentor.cutmix_two(
+            #             aug_image, aug_labels,
+            #             other_img, other_labels
+            #         )
 
             # 保存增强结果
             output_img_path = f'{output_dir}/images/{base_name}_aug{j}.jpg'
