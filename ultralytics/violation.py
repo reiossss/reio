@@ -61,7 +61,7 @@ class YoloPredict():
 
         """
         model_path = os.path.join('models', model_id)
-        model1 = YOLO('models/yellow_grid_v4.pt')
+        model1 = YOLO('models/yellow_grid_v5.pt')
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
         model2 = YOLO(model_path)
@@ -107,18 +107,17 @@ class YoloPredict():
                 self.current_time = frame_count / fps
 
                 results1 = model1.predict(source=frame, imgsz=image_size, conf=conf_threshold, device=0)
-                results2 = model2.predict(source=frame, imgsz=image_size, conf=conf_threshold, device=0)
                 trace = model2.track(frame, persist=True)[0]
 
                 # 计算覆盖率并获取高亮索引
-                coverage_ratios, highlight_indices = self.compute_coverage_and_highlight(results1[0], results2[0])
+                coverage_ratios, highlight_indices = self.compute_coverage_and_highlight(results1[0], trace)
                 plot = results1[0].plot(boxes=False)  # 第一个模型推理掩码结果
 
                 # Get the boxes and track IDs
                 if trace.boxes and trace.boxes.is_track:
                     boxes = trace.boxes.xywh.cpu()
                     track_ids = trace.boxes.id.int().cpu().tolist()
-                    classes = results2[0].boxes.cls.cpu().tolist()
+                    classes = trace.boxes.cls.cpu().tolist()
 
                     # Plot the tracks
                     for box, track_id, cls_id in zip(boxes, track_ids, classes):
@@ -136,13 +135,16 @@ class YoloPredict():
                             self.track_history[track_id] = []
 
                 # 在第一个模型的掩码结果上标红高IOU框
-                if hasattr(results2[0], 'boxes') and len(highlight_indices) > 0:
-                    boxes = results2[0].boxes.xyxy.cpu().numpy()
+                if hasattr(trace, 'boxes') and len(highlight_indices) > 0:
+                    boxes = trace.boxes.xyxy.cpu().numpy()
 
                     for idx in highlight_indices:
                         if idx < len(boxes):
                             box = boxes[idx].astype(int)
-                            track_id = trace.boxes.id[idx].item() if idx < len(trace.boxes) else -1
+                            try:
+                                track_id = trace.boxes.id[idx].item()
+                            except (AttributeError, TypeError, IndexError):
+                                track_id = -1
 
                             # 绘制红色边框
                             cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 1)
@@ -170,7 +172,7 @@ class YoloPredict():
                 for i, track_id in enumerate(sorted(self.violation_status.keys())):
                     if track_id in self.tracking_data:
                         class_id = self.tracking_data[track_id]['class_id']
-                        class_name = results2[0].names.get(class_id, f"Class_{class_id}")
+                        class_name = trace.names.get(class_id, f"Class_{class_id}")
                         self.violation_text += f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
                         if self.tracking_data[track_id]['total_time'] > 10:
                             self.violation_text += " | Violation"
@@ -261,7 +263,7 @@ gr_predict = YoloPredict()
 
 
 if __name__ == '__main__':
-    video = "/yolo/yolo11/data/vision/violation.mp4"
+    video = "data/vision/violation.mp4"
     model_id = "car_type_v11.pt"
     image_size = 640
     conf_threshold = 0.25
