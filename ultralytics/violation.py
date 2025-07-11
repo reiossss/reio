@@ -26,7 +26,6 @@ class YoloPredict():
         """
         初始化全局变量
         """
-        self.y_offset = 30  # 初始Y坐标偏移量
         self.current_time = 0.0
         self.tracking_data = {}
         self.violation_status = {}
@@ -146,9 +145,6 @@ class YoloPredict():
                             except (AttributeError, TypeError, IndexError):
                                 track_id = -1
 
-                            # 绘制红色边框
-                            cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 1)
-
                             # 更新时间统计
                             if track_id != -1 and track_id in self.tracking_data:
                                 data = self.tracking_data[track_id]
@@ -161,6 +157,21 @@ class YoloPredict():
                                 if data['total_time'] > 2:
                                     self.violation_status[track_id] = True
 
+                                # 绘制红色边框
+                                class_id = data['class_id']
+                                class_name = trace.names.get(class_id, f"Class_{class_id}")
+                                cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), (94,53,255), 2)
+                                self.violation_text += f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
+                                if self.tracking_data[track_id]['total_time'] > 10:
+                                    self.violation_text += " | Violation"
+
+                                # 计算文本背景
+                                (text_width, text_height), _ = cv2.getTextSize(self.violation_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                                cv2.rectangle(plot, (box[0], box[1] - 2 * text_height), (box[0] + text_width, box[1]), (94,53,255), -1)
+                                cv2.putText(plot, self.violation_text, (box[0] + 2, box[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+
+                            self.violation_text = ""
+
                 # 检查告警消失条件（5秒未激活）
                 for track_id, data in list(self.tracking_data.items()):
                     if self.current_time - data['last_active'] > 5:
@@ -168,21 +179,21 @@ class YoloPredict():
                             del self.violation_status[track_id]
                         data['start_time'] = None  # 重置计时
 
-                # 添加文本描绘违停车辆、违停时间和告警
-                for i, track_id in enumerate(sorted(self.violation_status.keys())):
-                    if track_id in self.tracking_data:
-                        class_id = self.tracking_data[track_id]['class_id']
-                        class_name = trace.names.get(class_id, f"Class_{class_id}")
-                        self.violation_text += f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
-                        if self.tracking_data[track_id]['total_time'] > 10:
-                            self.violation_text += " | Violation"
-
-                        self.y_offset += i * 30
-                        cv2.putText(plot, self.violation_text.rstrip(', '), (10, self.y_offset),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-                    self.violation_text = ""
-                    self.y_offset = 30
+                # # 添加文本描绘违停车辆、违停时间和告警
+                # for i, track_id in enumerate(sorted(self.violation_status.keys())):
+                #     if track_id in self.tracking_data:
+                #         class_id = self.tracking_data[track_id]['class_id']
+                #         class_name = trace.names.get(class_id, f"Class_{class_id}")
+                #         self.violation_text += f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
+                #         if self.tracking_data[track_id]['total_time'] > 10:
+                #             self.violation_text += " | Violation"
+                #
+                #         self.y_offset += i * 30
+                #         cv2.putText(plot, self.violation_text.rstrip(', '), (10, self.y_offset),
+                #                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                #
+                #     self.violation_text = ""
+                #     self.y_offset = 30
 
                 out.write(plot)
 
