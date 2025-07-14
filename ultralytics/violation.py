@@ -30,7 +30,13 @@ class YoloPredict():
         self.tracking_data = {}
         self.violation_status = {}
         self.violation_text = ""
+        self.color = (125, 125, 125)
         self.track_history = defaultdict(lambda: [])
+        # 类别名称映射
+        self.class_names = {
+            0: '自行车', 1: '车', 2: '面包车', 3: '卡车',
+            4: '三轮车', 5: '带蓬三轮车', 6: '公交车', 7: '摩托车'
+        }
 
 
     def reset(self):
@@ -40,7 +46,7 @@ class YoloPredict():
         self.current_time = 0.0
         self.tracking_data = {}
         self.violation_status = {}
-        self.violation_text = ""
+        # self.violation_text = ""
         self.track_history = defaultdict(lambda: [])
 
 
@@ -60,7 +66,7 @@ class YoloPredict():
 
         """
         model_path = os.path.join('models', model_id)
-        model1 = YOLO('models/yellow_grid_v5.pt')
+        model1 = YOLO('models/yellow_grid_v6.pt')
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
         model2 = YOLO(model_path)
@@ -161,16 +167,19 @@ class YoloPredict():
                                 class_id = data['class_id']
                                 class_name = trace.names.get(class_id, f"Class_{class_id}")
                                 cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), (94,53,255), 2)
-                                self.violation_text += f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
+                                text = f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
                                 if self.tracking_data[track_id]['total_time'] > 10:
-                                    self.violation_text += " | Violation"
+                                    self.color = (94, 53, 255)
 
-                                # 计算文本背景
-                                (text_width, text_height), _ = cv2.getTextSize(self.violation_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                                cv2.rectangle(plot, (box[0], box[1] - 2 * text_height), (box[0] + text_width, box[1]), (94,53,255), -1)
-                                cv2.putText(plot, self.violation_text, (box[0] + 2, box[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+                                else:
+                                    self.color = (125, 125, 125)
 
-                            self.violation_text = ""
+                                text_width = len(text) * 10
+                                cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), self.color, 2)
+                                cv2.rectangle(plot, (box[0], box[1] - 24),
+                                              (box[0] + text_width, box[1]), self.color, -1)
+                                cv2.putText(plot, text, (box[0] + 2, box[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+
 
                 # 检查告警消失条件（5秒未激活）
                 for track_id, data in list(self.tracking_data.items()):
@@ -277,5 +286,5 @@ if __name__ == '__main__':
     video = "data/vision/violation.mp4"
     model_id = "car_type_v11.pt"
     image_size = 640
-    conf_threshold = 0.25
+    conf_threshold = 0.4
     gr_predict.yolo_inference(None, video, model_id, image_size, conf_threshold)
