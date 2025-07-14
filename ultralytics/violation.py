@@ -71,7 +71,7 @@ class YoloPredict():
         os.makedirs(temp_dir, exist_ok=True)
         model2 = YOLO(model_path)
         if image:
-            results1 = model1.predict(source=image, imgsz=image_size, conf=conf_threshold, device=0)
+            results1 = model1.predict(source=image, imgsz=[1280, 1280], conf=conf_threshold, device=0)
             results2 = model2.predict(source=image, imgsz=image_size, conf=conf_threshold, device=0)
 
             # 计算覆盖率并获取高亮索引
@@ -111,7 +111,7 @@ class YoloPredict():
                 frame_count += 1
                 self.current_time = frame_count / fps
 
-                results1 = model1.predict(source=frame, imgsz=image_size, conf=conf_threshold, device=0)
+                results1 = model1.predict(source=frame, imgsz=[1280, 1280], conf=conf_threshold, device=0)
                 trace = model2.track(frame, persist=True)[0]
 
                 # 计算覆盖率并获取高亮索引
@@ -174,7 +174,7 @@ class YoloPredict():
                                 else:
                                     self.color = (125, 125, 125)
 
-                                text_width = len(text) * 10
+                                text_width = len(text) * 10 + 2
                                 cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), self.color, 2)
                                 cv2.rectangle(plot, (box[0], box[1] - 24),
                                               (box[0] + text_width, box[1]), self.color, -1)
@@ -213,7 +213,7 @@ class YoloPredict():
             return None, output_video_path
 
 
-    def compute_coverage_and_highlight(self, model1_results, model2_results, coverage_threshold=0.4):
+    def compute_coverage_and_highlight(self, model1_results, model2_results, coverage_threshold=0.2):
         """
         计算第二个模型检测框被第一个模型检测框覆盖的面积百分比，并标记高覆盖率的检测框
 
