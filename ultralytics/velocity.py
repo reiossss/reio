@@ -125,9 +125,9 @@ class VehicleSpeedEstimator():
 
                             # 在帧上绘制结果
                             class_name = results[0].names.get(class_id, f"Class_{class_id}")
-                            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (125, 125, 125), 2)
                             cv2.putText(frame, f"{class_name}[{track_id}] : {avg_speed:.1f} km/h", (int(x1), int(y1) - 10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (125, 125, 125), 2)
 
                             # 绘制轨迹
                             for j in range(1, len(self.vehicle_tracks[track_id])):
@@ -153,6 +153,6 @@ velocity = VehicleSpeedEstimator()
 if __name__ == '__main__':
     video = "/yolo/yolo11/data/vision/velocity2.mp4"
     model_id = "car_type_v11.pt"
-    image_size = 1920
-    conf_threshold = 0.25
+    image_size = 640
+    conf_threshold = 0.4
     velocity.yolo_inference(None, video, model_id, image_size, conf_threshold)
