@@ -109,6 +109,12 @@ git fetch --all --prune
 # 从暂存区移除所有文件
 git reset HEAD .
 
+# 查看当前关联远程仓库信息
+git remote -v
+
+# 删除远程仓库
+git remote remove <远程仓库名称>
+
 # 设置git代理，查看本机系统端口号，手动设置代理：设置 > 网咯和Internet > 代理
 git config --global http.proxy 127.0.0.1:7897
 git config --global https.proxy 127.0.0.1:7897
