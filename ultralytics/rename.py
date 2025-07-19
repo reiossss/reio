@@ -1,13 +1,13 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 """
-批量重命名文件夹内的图片个标签文件名称，按数字顺序排序，图片后缀不变
+批量重命名文件夹内的图片及标签文件名称，按数字顺序排序，图片后缀不变
 Rename the tag file names of the pictures in the folder in batches,
 sort them in numerical order, and keep the image suffix unchanged
 
 usage:
-    python rename_png.py \
-                    --input /yolo/dataset1/hat_and_clothes_v2 \
+    python rename.py \
+                    --input path/to/input_folder \
                     [--prefix '' \]
                     [--start 1 \]
                     [--digits 3 \]

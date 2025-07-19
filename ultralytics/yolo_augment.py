@@ -47,6 +47,7 @@ def get_augmentation_pipelines():
         A.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.2, p=0.75),
         A.RandomBrightnessContrast(p=0.7),
         A.HorizontalFlip(p=0.7),
+        A.VerticalFlip(p=0.7),
         A.Affine(
             scale=(0.8, 1.2),
             translate_percent=(-0.1, 0.1),
