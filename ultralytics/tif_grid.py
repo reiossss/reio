@@ -13,11 +13,11 @@ config.yaml:
     #  文件与目录路径
     # ------------------- #
     # 输入的大型TIF文件
-    input_tif: 'D:\downlord\p2.tif'
+    input_tif: 'D:/downlord/p3.tif'
     # 输出目录，用于存放最终结果
-    output_dir: 'D:\downlord\results'
+    output_dir: 'D:/downlord/results'
     # 目标检测模型的.pt文件路径 (例如YOLOv5, v7, v8)
-    model_path: 'models\car_type_v11.pt'
+    model_path: 'models/blue_v1.pt'
 
     # ------------------- #
     #  切片参数
@@ -59,7 +59,7 @@ import torchvision
 
 
 # --- 配置日志系统 --- #
-def setup_logger(output_dir):
+def setup_logger(input_tif, output_dir):
     """配置并返回logger对象"""
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -68,7 +68,8 @@ def setup_logger(output_dir):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # 文件处理器
-    log_file = os.path.join(output_dir, 'detection_log.txt')
+    output_filename = os.path.basename(input_tif)
+    log_file = os.path.join(output_dir, f"{os.path.splitext(output_filename)[0]}_detected.txt")
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(formatter)
 
@@ -163,7 +164,7 @@ def main(config):
     """主函数，协调整个推理流程"""
     # 设置日志
     os.makedirs(config['output_dir'], exist_ok=True)
-    logger = setup_logger(config['output_dir'])
+    logger = setup_logger(config['input_tif'], config['output_dir'])
     print_config(config, logger)
 
     # 1. 生成切片网格

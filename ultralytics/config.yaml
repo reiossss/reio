@@ -1,0 +1,32 @@
+# ------------------- #
+#  文件与目录路径
+# ------------------- #
+# 输入的大型TIF文件
+input_tif: 'D:/downlord/p1.tif'
+# 输出目录，用于存放最终结果
+output_dir: 'D:/downlord/results'
+# 目标检测模型的.pt文件路径 (例如YOLOv5, v7, v8)
+model_path: 'models/blue_v2.pt'
+
+# ------------------- #
+#  切片参数
+# ------------------- #
+# 切片尺寸 (正方形)
+tile_size: 640
+# 切片间的重叠像素
+overlap: 16
+
+# ------------------- #
+#  模型推理参数
+# ------------------- #
+# GPU设备ID (如果使用CPU，则设为 'cpu')
+device: 'cuda:0' # 或者 'cpu'
+# 目标检测的置信度阈值
+conf_threshold: 0.4
+# NMS (非极大值抑制) 的IOU阈值
+iou_threshold: 0.4
+# 推理时的图像尺寸（应与模型训练尺寸匹配）
+inference_img_size: 640
+
+# 使用的进程数 (0 表示使用所有可用的CPU核心)
+num_workers: 4
