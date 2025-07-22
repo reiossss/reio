@@ -59,7 +59,7 @@ import torchvision
 
 
 # --- 配置日志系统 --- #
-def setup_logger(input_tif, output_dir):
+def setup_logger(output_dir):
     """配置并返回logger对象"""
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -68,8 +68,7 @@ def setup_logger(input_tif, output_dir):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # 文件处理器
-    output_filename = os.path.basename(input_tif)
-    log_file = os.path.join(output_dir, f"{os.path.splitext(output_filename)[0]}_detected.txt")
+    log_file = os.path.join(output_dir, "detected.txt")
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(formatter)
 
@@ -119,7 +118,7 @@ def process_tile(args):
 
         # 处理多通道图像
         if img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
         elif img.shape[2] > 4:
             img = img[:, :, :3]  # 只取前三个通道
 
@@ -164,7 +163,7 @@ def main(config):
     """主函数，协调整个推理流程"""
     # 设置日志
     os.makedirs(config['output_dir'], exist_ok=True)
-    logger = setup_logger(config['input_tif'], config['output_dir'])
+    logger = setup_logger(config['output_dir'])
     print_config(config, logger)
 
     # 1. 生成切片网格
@@ -219,7 +218,7 @@ def main(config):
     logger.info(f"完成。NMS后剩余 {len(final_detections)} 个唯一目标。")
 
     # 4. 在原图上绘制最终结果
-    logger.info("步骤 4/5: 在原图上绘制最终边界框...")
+    logger.info("步骤 4/5: 在原图上绘制最终边界框并保存检测目标结果图...")
     with rasterio.open(config['input_tif']) as src:
         output_image = np.moveaxis(src.read(), 0, -1).copy()
 
@@ -234,11 +233,25 @@ def main(config):
             p2, p98 = np.percentile(output_image, (2, 98))
             output_image = np.clip((output_image - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
 
+        count = 1
+        output_filename = os.path.basename(config['input_tif'])
+        image_dir = os.path.join(config['output_dir'], f"{os.path.splitext(output_filename)[0]}")
+        os.makedirs(image_dir, exist_ok=True)
+
         for x1, y1, x2, y2, conf, label in tqdm(final_detections, desc="绘制边界框"):
-            cv2.rectangle(output_image, (int(x1), int(y1)), (int(x2), int(y2)), (36, 255, 12), 2)
+            x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+
+            cropped_img = output_image[(y1 - 50) : (y2 + 50), (x1 - 50) : (x2 + 50)]
+            cropped_img= cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
+            # x0, y0 = (x1 + x2) / 2, (y1 + y2) / 2
+            cut_image = os.path.join(image_dir, f"{count}.png")
+            count += 1
+            cv2.imwrite(cut_image, cropped_img)
+
+            cv2.rectangle(output_image, (x1 - 50, y1 - 50), (x2 + 50, y2 + 50), (255, 53, 94), 4)
             label_text = f"{label}: {conf:.2f}"
-            cv2.putText(output_image, label_text, (int(x1), int(y1) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+            cv2.putText(output_image, label_text, (x1 - 50, y1 - 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 53, 94), 4)
 
     logger.info("完成。")
 
