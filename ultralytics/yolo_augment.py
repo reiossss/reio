@@ -67,8 +67,7 @@ def process_single_image(args):
     """
     # 1. 解包参数
     (image_filename, input_images_dir, input_labels_dir,
-     output_images_dir, output_labels_dir, num_aug_per_image,
-     detection_transform, segmentation_transform) = args
+     output_images_dir, output_labels_dir, num_aug_per_image) = args
 
     base_name, ext = os.path.splitext(image_filename)
     image_path = os.path.join(input_images_dir, image_filename)
@@ -91,8 +90,10 @@ def process_single_image(args):
     if not current_format: return 0
 
     # --- 读取数据和增强 ---
-    image = cv2.imread(image_path)
+    image = cv2.imread(str(image_path))
     # image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    detection_transform, segmentation_transform = get_augmentation_pipelines()
 
     generated_count = 0
     for i in range(num_aug_per_image):
@@ -110,7 +111,7 @@ def process_single_image(args):
                 if not augmented['bboxes']: continue
 
                 aug_image_path = os.path.join(output_images_dir, aug_base_name + ext)
-                cv2.imwrite(aug_image_path, augmented['image'])
+                cv2.imwrite(str(aug_image_path), augmented['image'])
 
                 aug_label_path = os.path.join(output_labels_dir, aug_base_name + '.txt')
                 with open(aug_label_path, 'w') as f:
@@ -135,7 +136,7 @@ def process_single_image(args):
                 new_h, new_w = augmented['image'].shape[:2]
 
                 aug_image_path = os.path.join(output_images_dir, aug_base_name + ext)
-                cv2.imwrite(aug_image_path, augmented['image'])
+                cv2.imwrite(str(aug_image_path), augmented['image'])
 
                 aug_label_path = os.path.join(output_labels_dir, aug_base_name + '.txt')
                 yolo_labels = []
@@ -182,7 +183,6 @@ def augment_dataset_parallel(input_dir, output_dir, num_aug_per_image=1, num_thr
 
     # 2. 准备并行任务
     print(f"Step 2: 准备任务列表，将使用 {num_threads} 个CPU核心并行处理...")
-    detection_transform, segmentation_transform = get_augmentation_pipelines()
     image_files = [f for f in os.listdir(input_images_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 
     # 创建一个包含所有任务参数的列表
@@ -190,8 +190,7 @@ def augment_dataset_parallel(input_dir, output_dir, num_aug_per_image=1, num_thr
     for image_filename in image_files:
         tasks.append((
             image_filename, input_images_dir, input_labels_dir,
-            output_images_dir, output_labels_dir, num_aug_per_image,
-            detection_transform, segmentation_transform
+            output_images_dir, output_labels_dir, num_aug_per_image
         ))
 
     # 3. 并行执行任务
