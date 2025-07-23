@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 """
-tif图像目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程目标检测推理
+tif图像目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程或批处理目标检测推理
 TIF image object detection script that reads the config.yaml file
 to obtain parameters, divides the grid, and implements multiprocessing object detection inference.
 
@@ -41,6 +41,10 @@ config.yaml:
 
     # 使用的进程数 (0 表示使用所有可用的CPU核心)
     num_workers: 4
+
+    # 使用批处理
+    batch_size: 16
+
 """
 
 import os
@@ -158,6 +162,76 @@ def process_tile(args):
     return all_detections, None
 
 
+def batch_inference(windows, config):
+    """单进程批量处理模式（使用 YOLO 官方批量推理方法）"""
+    device = torch.device(config['device'])
+    model = YOLO(config['model_path']).to(device)
+    class_names = model.names
+    all_detections = []
+
+    # 批量处理窗口
+    for i in tqdm(range(0, len(windows), config['batch_size']), desc="批处理推理"):
+        batch_windows = windows[i:i + config['batch_size']]
+        batch_images = []
+        batch_metas = []  # 存储每个图像的元数据
+
+        # 读取批次数据
+        with rasterio.open(config['input_tif']) as src:
+            for window in batch_windows:
+                tile_data = src.read(window=window)
+                # 图像预处理
+                img = np.moveaxis(tile_data, 0, -1)
+
+                # 处理多通道图像
+                if img.shape[2] == 4:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+                elif img.shape[2] > 4:
+                    img = img[:, :, :3]  # 只取前三个通道
+
+                # 归一化到uint8
+                if img.dtype != np.uint8:
+                    p2, p98 = np.percentile(img, (2, 98))
+                    img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
+
+                # 记录窗口位置信息
+                meta = {
+                    'orig_shape': img.shape[:2],
+                    'window': window
+                }
+                batch_images.append(img)
+                batch_metas.append(meta)
+
+        # 使用 YOLO 的批量推理接口
+        results = model(batch_images, verbose=False)
+
+        # 处理结果
+        for j, (result, meta) in enumerate(zip(results, batch_metas)):
+            dets = result.boxes.data
+            window = meta['window']
+            orig_shape = meta['orig_shape']
+
+            if dets is not None and len(dets):
+                for *xyxy, conf, cls in reversed(dets):
+                    if conf < config['conf_threshold']:
+                        continue
+
+                    # 转换到全局坐标
+                    x_min_global = int(xyxy[0]) + window.col_off
+                    y_min_global = int(xyxy[1]) + window.row_off
+                    x_max_global = int(xyxy[2]) + window.col_off
+                    y_max_global = int(xyxy[3]) + window.row_off
+
+                    label_index = int(cls)
+                    label_name = class_names[label_index]
+
+                    all_detections.append([
+                        x_min_global, y_min_global, x_max_global, y_max_global,
+                        float(conf), label_name
+                    ])
+
+    return all_detections
+
+
 # --- 主函数 --- #
 def main(config):
     """主函数，协调整个推理流程"""
@@ -202,6 +276,10 @@ def main(config):
         logger.error(f"处理过程中遇到 {len(errors)} 个错误:")
         for error in errors:
             logger.error(error)
+
+    # # 在 main() 中替换多进程部分
+    # logger.info("使用单进程批处理模式...")
+    # all_detections_flat = batch_inference(windows, config)
 
     logger.info(f"完成。所有切片共检测到 {len(all_detections_flat)} 个初步目标。")
 
