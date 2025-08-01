@@ -168,7 +168,7 @@ class YoloPredict():
                                 class_name = trace.names.get(class_id, f"Class_{class_id}")
                                 cv2.rectangle(plot, (box[0], box[1]), (box[2], box[3]), (94,53,255), 2)
                                 text = f"{class_name}[{int(track_id)}] : {self.tracking_data[track_id]['total_time']:.2f}s"
-                                if self.tracking_data[track_id]['total_time'] > 10:
+                                if self.tracking_data[track_id]['total_time'] > 3:
                                     self.color = (94, 53, 255)
 
                                 else:
@@ -283,7 +283,7 @@ gr_predict = YoloPredict()
 
 
 if __name__ == '__main__':
-    video = "data/vision/violation.mp4"
+    video = "data/vision/violation5.mp4"
     model_id = "car_type_v11.pt"
     image_size = 640
     conf_threshold = 0.4

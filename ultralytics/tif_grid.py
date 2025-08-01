@@ -278,7 +278,7 @@ def main(config):
             logger.error(error)
 
     # # 在 main() 中替换多进程部分
-    # logger.info("使用单进程批处理模式...")
+    # logger.info(f"步骤 2/5: 使用 {config['batch_size']} 批次单进程批处理模式进行推理...")
     # all_detections_flat = batch_inference(windows, config)
 
     logger.info(f"完成。所有切片共检测到 {len(all_detections_flat)} 个初步目标。")
@@ -312,6 +312,7 @@ def main(config):
             output_image = np.clip((output_image - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
 
         count = 1
+        original_image = output_image.copy()
         output_filename = os.path.basename(config['input_tif'])
         image_dir = os.path.join(config['output_dir'], f"{os.path.splitext(output_filename)[0]}")
         os.makedirs(image_dir, exist_ok=True)
@@ -319,17 +320,17 @@ def main(config):
         for x1, y1, x2, y2, conf, label in tqdm(final_detections, desc="绘制边界框"):
             x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
 
-            cropped_img = output_image[(y1 - 50) : (y2 + 50), (x1 - 50) : (x2 + 50)]
+            cropped_img = original_image[(y1 - 50) : (y2 + 50), (x1 - 50) : (x2 + 50)]
             cropped_img= cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
             # x0, y0 = (x1 + x2) / 2, (y1 + y2) / 2
             cut_image = os.path.join(image_dir, f"{count}.png")
             count += 1
             cv2.imwrite(cut_image, cropped_img)
 
-            cv2.rectangle(output_image, (x1 - 50, y1 - 50), (x2 + 50, y2 + 50), (255, 53, 94), 4)
+            cv2.rectangle(output_image, (x1 - 200, y1 - 200), (x2 + 200, y2 + 200), (255, 0, 0), 10)
             label_text = f"{label}: {conf:.2f}"
-            cv2.putText(output_image, label_text, (x1 - 50, y1 - 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 53, 94), 4)
+            cv2.putText(output_image, label_text, (x1 - 200, y1 - 210),
+                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0), 10)
 
     logger.info("完成。")
 
