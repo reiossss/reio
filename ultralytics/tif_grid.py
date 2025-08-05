@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 """
-tif图像目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程或批处理目标检测推理
+tif图像切片目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程批处理目标检测推理
 TIF image object detection script that reads the config.yaml file
 to obtain parameters, divides the grid, and implements multiprocessing object detection inference.
 
@@ -33,9 +33,9 @@ config.yaml:
     # GPU设备ID (如果使用CPU，则设为 'cpu')
     device: 'cuda:0' # 或者 'cpu'
     # 目标检测的置信度阈值
-    conf_threshold: 0.4
+    conf_threshold: 0.85
     # NMS (非极大值抑制) 的IOU阈值
-    iou_threshold: 0.5
+    iou_threshold: 0.25
     # 推理时的图像尺寸（应与模型训练尺寸匹配）
     inference_img_size: 640
 
@@ -62,6 +62,20 @@ from tqdm import tqdm
 import torchvision
 
 
+# --- 打印配置信息 --- #
+def print_config(config, logger):
+    """打印配置信息"""
+    logger.info("=" * 50)
+    logger.info("检测配置参数:")
+    for key, value in config.items():
+        # 跳过可能的大对象
+        if isinstance(value, (list, dict)) and len(str(value)) > 100:
+            logger.info(f"{key}: [数据过长不显示]")
+        else:
+            logger.info(f"{key}: {value}")
+    logger.info("=" * 50)
+
+
 # --- 配置日志系统 --- #
 def setup_logger(output_dir):
     """配置并返回logger对象"""
@@ -85,159 +99,132 @@ def setup_logger(output_dir):
     return logger
 
 
-# --- 打印配置信息 --- #
-def print_config(config, logger):
-    """打印配置信息"""
-    logger.info("=" * 50)
-    logger.info("检测配置参数:")
-    for key, value in config.items():
-        # 跳过可能的大对象
-        if isinstance(value, (list, dict)) and len(str(value)) > 100:
-            logger.info(f"{key}: [数据过长不显示]")
-        else:
-            logger.info(f"{key}: {value}")
-    logger.info("=" * 50)
-
-
 # --- 工作进程函数 --- #
-def process_tile(args):
-    """工作进程函数，用于在单个切片上执行推理"""
-    tile_window, config = args
-    model = None
-    all_detections = []
-
+def process_chunk_worker(args):
+    """
+    工作函数：由每个独立进程执行。
+    该函数负责处理一个大区块（chunk）的窗口，并在内部进行批处理推理。
+    """
+    windows_chunk, config, logger = args
+    # 1. 在每个工作进程中独立加载模型
+    # 这是至关重要的，因为模型对象不能在进程间共享
     try:
-        # 在进程内加载模型
         device = torch.device(config['device'])
-        model = YOLO(config['model_path'])
-        model.to(device)
+        model = YOLO(config['model_path']).to(device)
         class_names = model.names
-
-        # 读取切片数据
-        with rasterio.open(config['input_tif']) as src:
-            tile_data = src.read(window=tile_window)
-
-        # 图像预处理
-        img = np.moveaxis(tile_data, 0, -1)
-
-        # 处理多通道图像
-        if img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-        elif img.shape[2] > 4:
-            img = img[:, :, :3]  # 只取前三个通道
-
-        # 归一化到uint8
-        if img.dtype != np.uint8:
-            p2, p98 = np.percentile(img, (2, 98))
-            img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
-
-        # 模型推理
-        results = model(img, verbose=False)
-        dets = results[0].boxes.data
-
-        if dets is not None and len(dets):
-            for *xyxy, conf, cls in reversed(dets):
-                if conf < config['conf_threshold']:
-                    continue
-
-                # 转换到全局坐标
-                x_min_global = int(xyxy[0]) + tile_window.col_off
-                y_min_global = int(xyxy[1]) + tile_window.row_off
-                x_max_global = int(xyxy[2]) + tile_window.col_off
-                y_max_global = int(xyxy[3]) + tile_window.row_off
-
-                label_index = int(cls)
-                label_name = class_names[label_index]
-
-                all_detections.append([
-                    x_min_global, y_min_global, x_max_global, y_max_global,
-                    float(conf), label_name
-                ])
-
     except Exception as e:
-        import traceback
-        error_msg = f"进程 {os.getpid()} 在处理切片 {tile_window} 时出错: {e}\n{traceback.format_exc()}"
-        return all_detections, error_msg
+        return [], f"模型加载失败: {e}"
 
-    return all_detections, None
+    local_detections = []
 
-
-def batch_inference(windows, config):
-    """单进程批量处理模式（使用 YOLO 官方批量推理方法）"""
-    device = torch.device(config['device'])
-    model = YOLO(config['model_path']).to(device)
-    class_names = model.names
-    all_detections = []
-
-    # 批量处理窗口
-    for i in tqdm(range(0, len(windows), config['batch_size']), desc="批处理推理"):
-        batch_windows = windows[i:i + config['batch_size']]
+    # 2. 对分配到的区块进行批处理，逻辑与原 batch_inference 函数相同
+    for i in range(0, len(windows_chunk), config['batch_size']):
+        batch_windows = windows_chunk[i:i + config['batch_size']]
         batch_images = []
-        batch_metas = []  # 存储每个图像的元数据
+        batch_metas = []
 
-        # 读取批次数据
-        with rasterio.open(config['input_tif']) as src:
-            for window in batch_windows:
-                tile_data = src.read(window=window)
-                # 图像预处理
-                img = np.moveaxis(tile_data, 0, -1)
+        try:
+            with rasterio.open(config['input_tif']) as src:
+                for window in batch_windows:
+                    tile_data = src.read(window=window)
+                    img = np.moveaxis(tile_data, 0, -1)
 
-                # 处理多通道图像
-                if img.shape[2] == 4:
-                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-                elif img.shape[2] > 4:
-                    img = img[:, :, :3]  # 只取前三个通道
+                    if img.shape[2] == 4:
+                        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+                    elif img.shape[2] > 4:
+                        img = img[:, :, :3]
 
-                # 归一化到uint8
-                if img.dtype != np.uint8:
-                    p2, p98 = np.percentile(img, (2, 98))
-                    img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
+                    if img.dtype != np.uint8:
+                        p2, p98 = np.percentile(img, (2, 98))
+                        img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
 
-                # 记录窗口位置信息
-                meta = {
-                    'orig_shape': img.shape[:2],
-                    'window': window
-                }
-                batch_images.append(img)
-                batch_metas.append(meta)
+                    # 检查图像是否全为黑色。如果是，则跳过此窗口。
+                    if np.max(img) == 0:
+                        continue  # 跳过当前循环，处理下一个 window
 
-        # 使用 YOLO 的批量推理接口
-        results = model(batch_images, verbose=False)
+                    meta = {'orig_shape': img.shape[:2], 'window': window}
+                    batch_images.append(img)
+                    batch_metas.append(meta)
 
-        # 处理结果
-        for j, (result, meta) in enumerate(zip(results, batch_metas)):
-            dets = result.boxes.data
-            window = meta['window']
-            orig_shape = meta['orig_shape']
+            # --- 在调用模型之前检查 batch_images 是否为空 ---
+            if not batch_images:
+                logger.warning(f"当前批次 ({i} 到 {i + config['batch_size'] - 1}) 没有有效图像，跳过推理。")
+                continue  # 如果 batch_images 为空，则跳过当前批次的推理
 
-            if dets is not None and len(dets):
-                for *xyxy, conf, cls in reversed(dets):
-                    if conf < config['conf_threshold']:
-                        continue
+            # 使用 YOLO 的批量推理接口
+            results = model(batch_images, verbose=False)
 
-                    # 转换到全局坐标
-                    x_min_global = int(xyxy[0]) + window.col_off
-                    y_min_global = int(xyxy[1]) + window.row_off
-                    x_max_global = int(xyxy[2]) + window.col_off
-                    y_max_global = int(xyxy[3]) + window.row_off
+            for j, (result, meta) in enumerate(zip(results, batch_metas)):
+                dets = result.boxes.data
+                window = meta['window']
 
-                    label_index = int(cls)
-                    label_name = class_names[label_index]
+                if dets is not None and len(dets):
+                    for *xyxy, conf, cls in reversed(dets):
+                        if conf < config['conf_threshold']:
+                            continue
 
-                    all_detections.append([
-                        x_min_global, y_min_global, x_max_global, y_max_global,
-                        float(conf), label_name
-                    ])
+                        x_min_global = int(xyxy[0]) + window.col_off
+                        y_min_global = int(xyxy[1]) + window.row_off
+                        x_max_global = int(xyxy[2]) + window.col_off
+                        y_max_global = int(xyxy[3]) + window.row_off
 
-    return all_detections
+                        label_name = class_names[int(cls)]
+
+                        local_detections.append([
+                            x_min_global, y_min_global, x_max_global, y_max_global,
+                            float(conf), label_name
+                        ])
+        except Exception as e:
+            # 返回错误，但允许其他批次继续
+            logger.error(f"处理批次时发生错误: {e}")
+            continue  # 继续处理下一个批次
+
+    return local_detections, None  # 返回检测结果和空错误
+
+
+# --- 多进程批处理函数 --- #
+def multiprocess_batch_inference(windows, config, logger):
+    """
+    多进程批处理函数。
+    将窗口列表分割成多个区块，每个区块分配给一个进程进行批处理推理。
+    """
+    num_workers = config['num_workers']
+    # logger.info(f"步骤 2/5: 使用 {num_workers} 个进程进行多进程批处理推理...")
+
+    # 1. 将所有窗口分割成 num_workers 个大区块
+    # np.array_split 可以很好地处理不能均分的情况
+    window_chunks = np.array_split(windows, num_workers)
+
+    # 为每个区块（任务）打包参数
+    tasks = [(chunk.tolist(), config, logger) for chunk in window_chunks if chunk.size > 0]
+
+    all_detections_flat = []
+    errors = []
+
+    # 2. 创建进程池，并将每个区块分配给一个工作函数
+    with Pool(processes=num_workers) as pool:
+        # tqdm 的 total 是任务数，即进程数
+        results = list(tqdm(pool.imap(process_chunk_worker, tasks), total=len(tasks), desc="多进程批处理进度"))
+
+    # 3. 收集并整理所有进程返回的结果
+    for detections, error in results:
+        if error:
+            errors.append(error)
+        if detections:
+            all_detections_flat.extend(detections)
+
+    # 记录错误信息
+    if errors:
+        logger.error(f"处理过程中遇到 {len(errors)} 个错误:")
+        for error in errors:
+            logger.error(error)
+
+    return all_detections_flat
 
 
 # --- 主函数 --- #
-def main(config):
+def main(config, logger):
     """主函数，协调整个推理流程"""
-    # 设置日志
-    os.makedirs(config['output_dir'], exist_ok=True)
-    logger = setup_logger(config['output_dir'])
     print_config(config, logger)
 
     # 1. 生成切片网格
@@ -256,30 +243,9 @@ def main(config):
 
     logger.info(f"完成。共找到 {len(windows)} 个切片。")
 
-    # 2. 多进程推理
-    logger.info(f"步骤 2/5: 使用 {config['num_workers']} 个进程进行并行推理...")
-    all_detections_flat = []
-    errors = []
-    tasks = [(window, config) for window in windows]
-
-    with Pool(processes=config['num_workers']) as pool:
-        results = list(tqdm(pool.imap(process_tile, tasks), total=len(tasks), desc="推理进度"))
-
-    for detections, error in results:
-        if error:
-            errors.append(error)
-        if detections:
-            all_detections_flat.extend(detections)
-
-    # 记录错误信息
-    if errors:
-        logger.error(f"处理过程中遇到 {len(errors)} 个错误:")
-        for error in errors:
-            logger.error(error)
-
-    # # 在 main() 中替换多进程部分
-    # logger.info(f"步骤 2/5: 使用 {config['batch_size']} 批次单进程批处理模式进行推理...")
-    # all_detections_flat = batch_inference(windows, config)
+    # 2. 多进程批处理推理
+    logger.info(f"步骤 2/5: 使用 {config['num_workers']} 个进程进行批处理推理...")
+    all_detections_flat = multiprocess_batch_inference(windows, config, logger)
 
     logger.info(f"完成。所有切片共检测到 {len(all_detections_flat)} 个初步目标。")
 
@@ -298,6 +264,7 @@ def main(config):
     # 4. 在原图上绘制最终结果
     logger.info("步骤 4/5: 在原图上绘制最终边界框并保存检测目标结果图...")
     with rasterio.open(config['input_tif']) as src:
+        h, w = src.height, src.width
         output_image = np.moveaxis(src.read(), 0, -1).copy()
 
         # 处理多通道图像
@@ -319,17 +286,26 @@ def main(config):
 
         for x1, y1, x2, y2, conf, label in tqdm(final_detections, desc="绘制边界框"):
             x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+            # 定义裁剪边界并确保不越界
+            crop_x1 = max(0, x1 - 50)
+            crop_y1 = max(0, y1 - 50)
+            crop_x2 = min(w, x2 + 50)
+            crop_y2 = min(h, y2 + 50)
 
-            cropped_img = original_image[(y1 - 50) : (y2 + 50), (x1 - 50) : (x2 + 50)]
+            cropped_img = original_image[crop_y1 : crop_y2, crop_x1 : crop_x2]
             cropped_img= cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
             # x0, y0 = (x1 + x2) / 2, (y1 + y2) / 2
             cut_image = os.path.join(image_dir, f"{count}.png")
             count += 1
             cv2.imwrite(cut_image, cropped_img)
 
-            cv2.rectangle(output_image, (x1 - 200, y1 - 200), (x2 + 200, y2 + 200), (255, 0, 0), 10)
+            crop0_x1 = max(10, x1 - 200)
+            crop0_y1 = max(10, y1 - 200)
+            crop0_x2 = min(w - 10, x2 + 200)
+            crop0_y2 = min(h - 10, y2 + 200)
+            cv2.rectangle(output_image, (crop0_x1, crop0_y1), (crop0_x2, crop0_y2), (255, 0, 0), 10)
             label_text = f"{label}: {conf:.2f}"
-            cv2.putText(output_image, label_text, (x1 - 200, y1 - 210),
+            cv2.putText(output_image, label_text, (crop0_x1, crop0_y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0), 10)
 
     logger.info("完成。")
@@ -375,7 +351,7 @@ if __name__ == '__main__':
 
     # 设置默认值
     config.setdefault('conf_threshold', 0.25)
-    config.setdefault('iou_threshold', 0.45)
+    config.setdefault('iou_threshold', 0.85)
     config.setdefault('overlap', 16)
 
     # 检查输入文件
@@ -383,7 +359,11 @@ if __name__ == '__main__':
         print(f"错误: 输入的TIF文件未找到 -> {config['input_tif']}")
         exit()
 
-    main(config)
+    # 设置日志
+    os.makedirs(config['output_dir'], exist_ok=True)
+    logger = setup_logger(config['output_dir'])
+
+    main(config, logger)
 
     end_time = time.time()
-    print(f"总耗时: {(end_time - start_time):.2f} s")
+    logger.info(f"总耗时: {(end_time - start_time):.2f} s")
