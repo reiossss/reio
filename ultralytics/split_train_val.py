@@ -5,8 +5,8 @@
 Training set and validation set division scripts
 
 usage:
-    python split_tran_val_v3.py \
-                    --input /yolo/dataset1/hat_and_clothes \
+    python split_train_val_v3.py \
+                    --input /yolo/dataset1/HatAndClothes \
                     [--ratio 0.8]
 
 folder:
@@ -52,12 +52,14 @@ def main():
     train_txt = os.path.join(args.input, "train_list.txt")
     val_txt = os.path.join(args.input, "val_list.txt")
 
+    images_dir = os.path.join(args.input, "images")
+
     # 获取所有图片的文件名
-    image_files = [f for f in os.listdir(args.input)
+    image_files = [f for f in os.listdir(images_dir)
                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'))]
 
     if not image_files:
-        print(f"错误：在目录中未找到图片文件 - {args.input}")
+        print(f"错误：在目录中未找到图片文件 - {images_dir}")
         return
 
     num_images = len(image_files)
@@ -74,9 +76,9 @@ def main():
     with open(train_txt, 'w') as train_f, open(val_txt, 'w') as val_f:
         for img in train_images:
             # 写入图片的完整路径
-            train_f.write(os.path.join(args.input, img) + '\n')
+            train_f.write(os.path.join(images_dir, img) + '\n')
         for img in val_images:
-            val_f.write(os.path.join(args.input, img) + '\n')
+            val_f.write(os.path.join(images_dir, img) + '\n')
 
     print(f"数据集划分完成:")
     print(f"  图片总数: {num_images}")

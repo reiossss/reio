@@ -24,9 +24,9 @@ def yolo_inference(image, video, model_id, image_size, conf_threshold):
 
         return plot[:, :, ::-1], None
     else:
-        temp_dir = "D:/project/ultralytics/temp"
+        temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
-        video_path = tempfile.mktemp(suffix=".webm", dir=temp_dir)
+        video_path = tempfile.mktemp(suffix=".mp4", dir=temp_dir)
         with open(video_path, "wb") as f:
             with open(video, "rb") as g:
                 f.write(g.read())
@@ -36,8 +36,8 @@ def yolo_inference(image, video, model_id, image_size, conf_threshold):
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        output_video_path = tempfile.mktemp(suffix=".webm", dir=temp_dir)
-        out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'vp80'), fps, (frame_width, frame_height))
+        output_video_path = tempfile.mktemp(suffix=".mp4", dir=temp_dir)
+        out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -75,7 +75,9 @@ def app():
                     label="Model",
                     choices=[
                         "yolo11x.pt",
-                        "car_type_v5_p2.pt"
+                        "manhole_cover_v4.pt",
+                        "car_type_v11.pt",
+                        "hat_and_clothes_v7.pt"
                     ],
                     value="yolo11x.pt",
                 )
@@ -148,7 +150,7 @@ def app():
                 conf_threshold,
             ],
             outputs=[output_image],
-            cache_examples='lazy',
+            cache_examples=False,
         )
 
 

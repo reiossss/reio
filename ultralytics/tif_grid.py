@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 """
-tif图像切片目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程批处理目标检测推理
+tif图像目标检测脚本，读取config.yaml文件获取参数划分网格实现多线程或批处理目标检测推理
 TIF image object detection script that reads the config.yaml file
 to obtain parameters, divides the grid, and implements multiprocessing object detection inference.
 
@@ -13,9 +13,9 @@ config.yaml:
     #  文件与目录路径
     # ------------------- #
     # 输入的大型TIF文件
-    input_tif: 'D:/downlord/p3.tif'
+    input_tif: 'D:/download/p3.tif'
     # 输出目录，用于存放最终结果
-    output_dir: 'D:/downlord/results'
+    output_dir: 'D:/download/results'
     # 目标检测模型的.pt文件路径 (例如YOLOv5, v7, v8)
     model_path: 'models/blue_v1.pt'
 
@@ -87,7 +87,7 @@ def setup_logger(output_dir):
 
     # 文件处理器
     log_file = os.path.join(output_dir, "detected.txt")
-    file_handler = logging.FileHandler(log_file)
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(formatter)
 
     # 控制台处理器
@@ -99,36 +99,37 @@ def setup_logger(output_dir):
     return logger
 
 
-# --- 工作进程函数 --- #
 def process_chunk_worker(args):
-    """
-    工作函数：由每个独立进程执行。
-    该函数负责处理一个大区块（chunk）的窗口，并在内部进行批处理推理。
-    """
     windows_chunk, config, logger = args
-    # 1. 在每个工作进程中独立加载模型
-    # 这是至关重要的，因为模型对象不能在进程间共享
     try:
         device = torch.device(config['device'])
-        model = YOLO(config['model_path']).to(device)
+        # 加载已经为动态批处理优化的TensorRT引擎
+        model = YOLO(config['model_path'], task="detect")
         class_names = model.names
     except Exception as e:
-        return [], f"模型加载失败: {e}"
+        return [], f"模型加载失败于进程 {os.getpid()}: {e}"
 
     local_detections = []
 
-    # 2. 对分配到的区块进行批处理，逻辑与原 batch_inference 函数相同
-    for i in range(0, len(windows_chunk), config['batch_size']):
-        batch_windows = windows_chunk[i:i + config['batch_size']]
-        batch_images = []
-        batch_metas = []
+    try:
+        src = rasterio.open(config['input_tif'])
+    except Exception as e:
+        return [], f"rasterio 打开失败于进程 {os.getpid()}: {e}"
 
-        try:
-            with rasterio.open(config['input_tif']) as src:
-                for window in batch_windows:
-                    tile_data = src.read(window=window)
+    try:
+        for i in range(0, len(windows_chunk), config['batch_size']):
+            batch_windows = windows_chunk[i:i + config['batch_size']]
+            batch_images = []
+            batch_metas = []
+
+            for window in batch_windows:
+                try:
+                    # 直接读取并缩放到 tile_size，可减少后续 resize/pad
+                    tile_data = src.read(window=window, out_shape=(src.count, config['tile_size'], config['tile_size']))
+                    if tile_data is None or tile_data.size == 0:
+                        continue
+
                     img = np.moveaxis(tile_data, 0, -1)
-
                     if img.shape[2] == 4:
                         img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
                     elif img.shape[2] > 4:
@@ -136,50 +137,43 @@ def process_chunk_worker(args):
 
                     if img.dtype != np.uint8:
                         p2, p98 = np.percentile(img, (2, 98))
-                        img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
+                        if p98 - p2 > 0:
+                            img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
+                        else:
+                            img = np.zeros_like(img, dtype=np.uint8)
 
-                    # 检查图像是否全为黑色。如果是，则跳过此窗口。
                     if np.max(img) == 0:
-                        continue  # 跳过当前循环，处理下一个 window
+                        continue
 
-                    meta = {'orig_shape': img.shape[:2], 'window': window}
                     batch_images.append(img)
-                    batch_metas.append(meta)
+                    batch_metas.append({'window': window})
+                except Exception as tile_e:
+                    logger.debug(f"窗口 {window} 读取失败: {tile_e}")
+                    continue
 
-            # --- 在调用模型之前检查 batch_images 是否为空 ---
             if not batch_images:
-                logger.warning(f"当前批次 ({i} 到 {i + config['batch_size'] - 1}) 没有有效图像，跳过推理。")
-                continue  # 如果 batch_images 为空，则跳过当前批次的推理
+                continue
 
-            # 使用 YOLO 的批量推理接口
-            results = model(batch_images, verbose=False)
-
-            for j, (result, meta) in enumerate(zip(results, batch_metas)):
-                dets = result.boxes.data
-                window = meta['window']
-
-                if dets is not None and len(dets):
-                    for *xyxy, conf, cls in reversed(dets):
-                        if conf < config['conf_threshold']:
-                            continue
-
-                        x_min_global = int(xyxy[0]) + window.col_off
-                        y_min_global = int(xyxy[1]) + window.row_off
-                        x_max_global = int(xyxy[2]) + window.col_off
-                        y_max_global = int(xyxy[3]) + window.row_off
-
-                        label_name = class_names[int(cls)]
-
-                        local_detections.append([
-                            x_min_global, y_min_global, x_max_global, y_max_global,
-                            float(conf), label_name
-                        ])
-        except Exception as e:
-            # 返回错误，但允许其他批次继续
-            logger.error(f"处理批次时发生错误: {e}")
-            continue  # 继续处理下一个批次
-
-    return local_detections, None  # 返回检测结果和空错误
+            # 推理
+            try:
+                results = model.predict(batch_images, verbose=False, conf=config['conf_threshold'], iou=config['iou_threshold'], device=device)
+                for result, meta in zip(results, batch_metas):
+                    dets = result.boxes.data
+                    window = meta['window']
+                    if dets is not None and len(dets):
+                        for *xyxy, conf, cls in reversed(dets):
+                            x_min_global = int(xyxy[0]) + window.col_off
+                            y_min_global = int(xyxy[1]) + window.row_off
+                            x_max_global = int(xyxy[2]) + window.col_off
+                            y_max_global = int(xyxy[3]) + window.row_off
+                            label_name = class_names[int(cls)]
+                            local_detections.append([x_min_global, y_min_global, x_max_global, y_max_global, float(conf), label_name])
+            except Exception as e:
+                logger.error(f"批次推理错误: {e}")
+                continue
+    finally:
+        src.close()
+        return local_detections, None
 
 
 # --- 多进程批处理函数 --- #
@@ -296,7 +290,6 @@ def main(config, logger):
             cropped_img= cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
             # x0, y0 = (x1 + x2) / 2, (y1 + y2) / 2
             cut_image = os.path.join(image_dir, f"{count}.png")
-            count += 1
             cv2.imwrite(cut_image, cropped_img)
 
             crop0_x1 = max(10, x1 - 200)
@@ -304,9 +297,10 @@ def main(config, logger):
             crop0_x2 = min(w - 10, x2 + 200)
             crop0_y2 = min(h - 10, y2 + 200)
             cv2.rectangle(output_image, (crop0_x1, crop0_y1), (crop0_x2, crop0_y2), (255, 0, 0), 10)
-            label_text = f"{label}: {conf:.2f}"
+            label_text = f"{count}: {conf:.2f}"
             cv2.putText(output_image, label_text, (crop0_x1, crop0_y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0), 10)
+            count += 1
 
     logger.info("完成。")
 

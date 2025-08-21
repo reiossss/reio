@@ -2,11 +2,11 @@
 #  文件与目录路径
 # ------------------- #
 # 输入的大型TIF文件
-input_tif: '/yolo/tif/data/tif/p2.tif'
+input_tif: 'D:/download/tif/p10.tif'
 # 输出目录，用于存放最终结果
-output_dir: '/yolo/tif/results'
+output_dir: 'D:/download/results'
 # 目标检测模型的.pt文件路径 (例如YOLOv5, v7, v8)
-model_path: 'models/blue_v2.pt'
+model_path: 'models/blue_v5.engine'
 
 # ------------------- #
 #  切片参数
@@ -22,14 +22,14 @@ overlap: 16
 # GPU设备ID (如果使用CPU，则设为 'cpu')
 device: 'cuda:0' # 或者 'cpu'
 # 目标检测的置信度阈值
-conf_threshold: 0.7
+conf_threshold: 0.85
 # NMS (非极大值抑制) 的IOU阈值
-iou_threshold: 0.4
+iou_threshold: 0.25
 # 推理时的图像尺寸（应与模型训练尺寸匹配）
 inference_img_size: 640
 
 # 使用的进程数 (0 表示使用所有可用的CPU核心)
-num_workers: 4
+num_workers: 2
 
 # 使用批处理
-batch_size: 16
+batch_size: 4
